@@ -38,15 +38,15 @@ def main():
         os.makedirs(CONFIGURATION["DVFDir"],exist_ok=True)
         deepFeaturesExtraction(de,CONFIGURATION)
 
-    #developBaseline(de,CONFIGURATION)
+    developBaseline(de,CONFIGURATION)
     for m in CONFIGURATION["devModels"]:
-    #    if not os.path.isdir(os.path.join(CONFIGURATION["modelsPath"],m)):
-    #        developDeepModel(de,m,CONFIGURATION)
+        if not os.path.isdir(os.path.join(CONFIGURATION["modelsPath"],m)):
+            developDeepModel(de,m,CONFIGURATION)
     #        # Actualy re-validation
-    #    deployModel(de,m,CONFIGURATION)
-     
-        deployModel(de,m,CONFIGURATION,"Test")
-    #deployModel(de,"ApC",CONFIGURATION,"Test")
+        deployModel(de,m,CONFIGURATION)
+
+    # Predict test data using the best model. 
+    deployModel(de,"ApC",CONFIGURATION,"Test")
 
 
 if __name__ == "__main__":

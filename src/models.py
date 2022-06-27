@@ -76,7 +76,6 @@ class DFExtractor(nn.Module):
         for s in range(0,x.size(1)):
             with torch.no_grad():
                 frameFeatures = self.featureExtractor(x[:, s, :, :, :]) 
-                print(frameFeatures.shape)
                 frameFeatures = frameFeatures.view(frameFeatures.size(0), -1)
             featuresSeq.append(frameFeatures)
 
@@ -110,7 +109,6 @@ class DMDataset(torch.utils.data.Dataset):
         return X,y
 
 '''
-    Val Loss: 1.373 - Val F1: 0.97
 '''
 class ApA(nn.Module):
     def __init__(self,noClasses,lstmLayers=1,lstmHidden=1024):
@@ -140,7 +138,6 @@ class ApA(nn.Module):
         return x
 
 '''
-    Vl = 0.37, F1 = 0.97
 '''
 class ApB(nn.Module):
     def __init__(self,noClasses,lstmLayers=1,feHidden=1024,lstmHidden=1024):
@@ -450,7 +447,7 @@ def developDeepModel(de,modelName,CONFIGURATION):
         trainLoss, trainScore = epochTrain(model,device,trainDataGen,optimizer,report=50)
         valLoss, valScore = epochVal(model,device,valDataGen)
 
-        print("[INFO]       Epoch {} ---> Training Loss = {:.4} - Training Accuracy {:.4} -Validation Loss = {:.4} - Validation Accuracy = {:.4}".format(epoch,trainLoss,trainScore,valLoss,valScore))
+        print("[INFO]       Epoch {} ---> Training Loss = {:.4} - Training F1 {:.4} -Validation Loss = {:.4} - Validation F1 = {:.4}".format(epoch,trainLoss,trainScore,valLoss,valScore))
         
         trainLosses.append(trainLoss)
         trainScores.append(trainScore)
@@ -618,20 +615,23 @@ def deployModel(de,modelName,CONFIGURATION,mode="Val"):
             print(classification_report(y_pred=yPredList,y_true=yTrueList))
             print(confusion_matrix(y_pred=yPredList,y_true=yTrueList))
 
-
+'''
+'''
 def getTexture(img):
-    xs=[]
+    fts = list()
     img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     glcm = skimage.feature.graycomatrix(img, [5], [0], 256, symmetric=True, normed=True)
-    xs.append(skimage.feature.graycoprops(glcm, 'contrast')[0,0])
-    xs.append(skimage.feature.graycoprops(glcm, 'dissimilarity')[0, 0])
-    xs.append(skimage.feature.graycoprops(glcm, 'homogeneity')[0, 0])
-    xs.append(skimage.feature.graycoprops(glcm, 'ASM')[0, 0])
-    xs.append(skimage.feature.graycoprops(glcm, 'energy')[0, 0])
-    xs.append(skimage.feature.graycoprops(glcm, 'correlation')[0, 0])
-    return np.array(xs)
+    fts.append(skimage.feature.graycoprops(glcm, 'contrast')[0,0])
+    fts.append(skimage.feature.graycoprops(glcm, 'dissimilarity')[0, 0])
+    fts.append(skimage.feature.graycoprops(glcm, 'homogeneity')[0, 0])
+    fts.append(skimage.feature.graycoprops(glcm, 'ASM')[0, 0])
+    fts.append(skimage.feature.graycoprops(glcm, 'energy')[0, 0])
+    fts.append(skimage.feature.graycoprops(glcm, 'correlation')[0, 0])
+    features = np.array(fts)
+    return features
 
-
+'''
+'''
 def extractHCFeatures(df,CONFIGURATION):
     X = list()
     y = list()
@@ -659,8 +659,6 @@ def extractHCFeatures(df,CONFIGURATION):
     y = np.array(y)
 
     return X,y
-
-
 
 '''
 '''
