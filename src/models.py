@@ -2,12 +2,16 @@ import os
 import numpy as np
 import pandas as pd
 import cv2
+import skimage
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
 import torchvision.transforms as transforms
 from decord import VideoReader
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
 from sklearn.metrics import f1_score, classification_report, confusion_matrix
 
 
@@ -101,23 +105,6 @@ class DMDataset(torch.utils.data.Dataset):
         featuresPath = os.path.join(self.CONFIGURATION["DVFDir"],"{}.pt".format(node.Name))      
         features = torch.load(featuresPath,map_location=torch.device('cpu'))
         X = features
-
-        '''
-        node = self.dataDF.iloc[index]
-        videoPath = node.Path
-        vr = VideoReader(videoPath)
-        framesArray = list()
-
-        for i in range(node.SegmentStart,node.SegmentStart+self.CONFIGURATION["maxFrames"]):
-            frame = vr[i].asnumpy()
-            #if node.Augmentation != "None":
-            #    self.augmentor(frame)
-            frame = self.transform(frame)
-            framesArray.append(frame)
-
-        X = torch.stack(framesArray, dim=0)
-
-        '''
         y = torch.LongTensor([node.Label])  
 
         return X,y
@@ -553,9 +540,11 @@ def deployModel(de,modelName,CONFIGURATION,mode="Val"):
 
     if mode != "ind":
         if mode == "Val":
-            valDF = de.videoSegments[de.videoSegments["Portion"] == "Validation"].sample(frac=1).reset_index(drop=True)
+            portion = "Validation"
         else:
-            valDF = de.videoSegments[de.videoSegments["Portion"] == "Test"].sample(frac=1).reset_index(drop=True)
+            portion = "Test"
+        
+        valDF = de.videoSegments[de.videoSegments["Portion"] == portion].sample(frac=1).reset_index(drop=True)
         
         valSet = DMDataset(valDF,CONFIGURATION)        
         valDataGen = torch.utils.data.DataLoader(valSet,**CONFIGURATION["datasetParams"])
@@ -565,7 +554,9 @@ def deployModel(de,modelName,CONFIGURATION,mode="Val"):
         epochLoss = 0
         yTrueList = list()
         yPredList = list()
-        
+
+        posts = list()
+
         with torch.no_grad():
             for X, y in valDataGen:
                 X = X.to(device)
@@ -576,23 +567,120 @@ def deployModel(de,modelName,CONFIGURATION,mode="Val"):
                 loss = F.cross_entropy(output, y)
                 
                 epochLoss += loss.item() * X.size(0)
-                
+                posteriors = F.softmax(output)
+                posts.extend(posteriors)
+
                 pred = output.max(1, keepdim=True)[1]  
 
                 yTrueList.extend(y)
                 yPredList.extend(pred)
-                
+        
+        epochLoss = epochLoss/len(valDataGen)
+
         yTrue = torch.stack(yTrueList, dim=0)
         yPred = torch.stack(yPredList, dim=0)
 
-        score = f1_score(yTrue.cpu().data.squeeze().numpy(), yPred.cpu().data.squeeze().numpy(),average='macro')
-
-        epochLoss = epochLoss/len(valDataGen)
-        
         if mode == "Val":
+            score = f1_score(yTrue.cpu().data.squeeze().numpy(), yPred.cpu().data.squeeze().numpy(),average='macro')
             print(score,epochLoss)
-        else:
-            print(classification_report(y_pred=yPred.cpu().data.squeeze().numpy(),y_true=yTrue.cpu().data.squeeze().numpy()))
-            print(confusion_matrix(y_pred=yPred.cpu().data.squeeze().numpy(),y_true=yTrue.cpu().data.squeeze().numpy()))
-    
-    
+        else:  
+
+            posts = torch.stack(posts, dim=0)
+            posts = posts.cpu().data.squeeze().numpy()
+
+            predDF = valDF.copy()
+            predDF["C0"] = posts[:,0]
+            predDF["C1"] = posts[:,1]
+            predDF["C2"] = posts[:,2]
+            predDF["C3"] = posts[:,3]
+            
+            datasetInfo = de.datasetInfo[de.datasetInfo["Portion"] == portion]
+
+            yTrueList = list()
+            yPredList = list()
+
+            for seq in np.unique(datasetInfo["Name"].values):
+                seqPath = datasetInfo[datasetInfo["Name"] == seq].iloc[0].Path
+                seqDF = predDF[predDF["Path"] == seqPath]
+                seqDF["C0"] = sum(seqDF["C0"])/len(seqDF)
+                seqDF["C1"] = sum(seqDF["C1"])/len(seqDF)
+                seqDF["C2"] = sum(seqDF["C2"])/len(seqDF)
+                seqDF["C3"] = sum(seqDF["C3"])/len(seqDF)
+                
+                posteriors = seqDF.iloc[0,-4:].values
+                yPred = np.argmax(posteriors)
+                yTrue = seqDF["Label"].values[0]
+                
+                yPredList.append(yPred)
+                yTrueList.append(yTrue)
+            
+  
+            print(classification_report(y_pred=yPredList,y_true=yTrueList))
+            print(confusion_matrix(y_pred=yPredList,y_true=yTrueList))
+
+
+def getTexture(img):
+    xs=[]
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    glcm = skimage.feature.graycomatrix(img, [5], [0], 256, symmetric=True, normed=True)
+    xs.append(skimage.feature.graycoprops(glcm, 'contrast')[0,0])
+    xs.append(skimage.feature.graycoprops(glcm, 'dissimilarity')[0, 0])
+    xs.append(skimage.feature.graycoprops(glcm, 'homogeneity')[0, 0])
+    xs.append(skimage.feature.graycoprops(glcm, 'ASM')[0, 0])
+    xs.append(skimage.feature.graycoprops(glcm, 'energy')[0, 0])
+    xs.append(skimage.feature.graycoprops(glcm, 'correlation')[0, 0])
+    return np.array(xs)
+
+
+def extractHCFeatures(df,CONFIGURATION):
+    X = list()
+    y = list()
+
+    for node in df.itertuples():
+        
+        videoPath = node.Path
+        vr = VideoReader(videoPath)
+        framesArray = list()
+
+        for i in range(node.SegmentStart,node.SegmentStart+CONFIGURATION["maxFrames"]):
+            frame = vr[i].asnumpy()
+            features = getTexture(frame)
+            framesArray.append(features)
+            
+        x = np.array(framesArray)
+        meanX = np.mean(x,0)
+        stdX = np.std(x,0)
+
+        hcFeatures = np.concatenate([meanX,stdX])
+        X.append(hcFeatures)
+        y.append(node.Label)
+
+    X = np.array(X)
+    y = np.array(y)
+
+    return X,y
+
+
+
+'''
+'''
+def developBaseline(de,CONFIGURATION):
+
+    trainDF = de.videoSegments[de.videoSegments["Portion"] == "Training"].sample(frac=1).reset_index(drop=True)
+    valDF = de.videoSegments[de.videoSegments["Portion"] == "Validation"].sample(frac=1).reset_index(drop=True)
+
+    print("[INFO]   Feature Extraction: Train")    
+    xTrain, yTrain = extractHCFeatures(trainDF,CONFIGURATION)
+    print("[INFO]   Feature Extraction: Validation")
+    xVal, yVal = extractHCFeatures(valDF,CONFIGURATION)
+
+    pipe = Pipeline([('scaler', StandardScaler()), ('svc', SVC(kernel="rbf"))])
+
+    print("[INFO]   Train Baseline model...")
+    pipe.fit(xTrain,yTrain)
+
+    print("[INFO]   Predict...")
+    predictions = pipe.predict(xVal)
+
+    print(classification_report(yVal,predictions))
+    print(confusion_matrix(y_true=yVal,y_pred=predictions))
