@@ -7,4 +7,5 @@
 1. Create a virtual enviroment
 2. Install --> requirements.txt
 3. run ./src/main.py
+
 ALERT: Only for cuda-enable devices! 
