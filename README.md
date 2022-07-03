@@ -10,7 +10,7 @@
 
 ALERT: Only for cuda-enable devices! 
 
-You can selected the desired classes of UCF 101 dataset by changing the CONFIGURATION dictionary in main.py. It is essential that you should monitor the models if you change classes. 
+You can select the desired classes of UCF 101 dataset by changing the CONFIGURATION dictionary in main.py. It is essential that you should monitor the models if you change classes. 
 
 ### TO-DO:
 1. Optimize the pre-trained CNN using backpropagation (not freezed).
